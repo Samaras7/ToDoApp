@@ -1,0 +1,135 @@
+﻿@model IEnumerable<ToDoApp.Models.Task>
+
+@{
+    ViewBag.Title = "Tasks";
+    var selectedDate = ViewBag.SelectedDate as DateTime?;
+}
+
+<h1>Tasks for @selectedDate?.ToString("yyyy-MM-dd")</h1>
+<a asp-action="Create" class="btn btn-primary" asp-route-date="@selectedDate">Create New Task</a>
+
+<form method="get">
+    <label for="date">Change Date:</label>
+    <input type="date" name="date" value="@selectedDate?.ToString("yyyy-MM-dd")" />
+    <input type="submit" value="Go" class="btn btn-secondary" />
+</form>
+
+<div id="notifications">
+    <div id="todayNotification" class="alert alert-info">
+        <strong>Today's tasks:</strong> No tasks.
+    </div>
+    <div id="tomorrowNotification" class="alert alert-warning">
+        <strong>Tomorrow's tasks:</strong> No tasks.
+    </div>
+</div>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Title</th>
+            <th>Description</th>
+            <th>DueDate</th>
+            <th>Completed</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (Model != null && Model.Any())
+        {
+            foreach (var task in Model)
+            {
+                <tr>
+                    <td>@task.Title</td>
+                    <td>@task.Description</td>
+                    <td>@task.DueDate.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        <input type="checkbox" class="form-check-input" id="completeSwitch_@task.Id" @(task.IsCompleted ? "checked" : "") onchange="updateTaskStatus(@task.Id, this.checked)" />
+                    </td>
+                    <td>
+                        <a asp-action="Edit" asp-route-id="@task.Id" asp-route-date="@selectedDate">Edit</a> |
+                        <form asp-action="DeleteConfirmed" asp-route-id="@task.Id" method="post" style="display:inline">
+                            <input type="hidden" name="date" value="@selectedDate?.ToString("yyyy-MM-dd")" />
+                            <button type="submit" class="btn btn-link" onclick="return confirm('Are you sure you want to delete this task?');">
+                                Delete
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="5">No tasks available for @selectedDate?.ToString("yyyy-MM-dd")</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.0/signalr.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script type="text/javascript">
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/signalHub")
+            .build();
+
+        function setTaskCounts(todayCount, tomorrowCount) {
+            const todayNotification = document.getElementById("todayNotification");
+            const tomorrowNotification = document.getElementById("tomorrowNotification");
+
+            if (todayCount > 0) {
+                todayNotification.innerHTML = `<strong>Today's tasks:</strong> ${todayCount} tasks to do.`;
+            } else {
+                todayNotification.innerHTML = `<strong>Today's tasks:</strong> No tasks for today.`;
+            }
+
+            if (tomorrowCount > 0) {
+                tomorrowNotification.innerHTML = `<strong>Tomorrow's tasks:</strong> ${tomorrowCount} tasks to do.`;
+            } else {
+                tomorrowNotification.innerHTML = `<strong>Tomorrow's tasks:</strong> No tasks for tomorrow.`;
+            }
+        }
+
+        connection.on("ReceiveMessage", function (tasksForTodayCount, tasksForTomorrowCount) {
+            setTaskCounts(tasksForTodayCount, tasksForTomorrowCount);
+        });
+
+        connection.start().then(function () {
+            const todayCount = @Model.Count(t => t.DueDate.Date == DateTime.Today && !t.IsCompleted);
+            const tomorrowCount = @Model.Count(t => t.DueDate.Date == DateTime.Today.AddDays(1) && !t.IsCompleted);
+            setTaskCounts(todayCount, tomorrowCount);
+
+            connection.invoke("SendNotifications").catch(function (err) {
+                console.error(err.toString());
+            });
+        }).catch(function (err) {
+            console.error(err.toString());
+        });
+
+        function updateTaskStatus(taskId, isCompleted) {
+            $.ajax({
+                url: '@Url.Action("UpdateTaskStatus", "Tasks")',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ id: taskId, isCompleted: isCompleted }),
+                success: function () {
+                    console.log("Task status updated successfully");
+
+                    connection.invoke("SendNotifications").catch(function (err) {
+                        console.error(err.toString());
+                    });
+                },
+                error: function (error) {
+                    console.error("Error updating task status:", error);
+                }
+            });
+        }
+
+        $(document).ready(function () {
+            connection.invoke("SendNotifications").catch(function (err) {
+                console.error(err.toString());
+            });
+        });
+    </script>
+}
